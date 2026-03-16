@@ -1,0 +1,201 @@
+package ui
+
+type DashboardData struct {
+	MapCenter [2]float64
+	MapZoom   int
+}
+
+templ Dashboard(data *DashboardData) {
+	<!DOCTYPE html>
+	<html lang="en" class="scroll-smooth">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>Yieldi - Grain Hedge Engine</title>
+			<script src="https://cdn.tailwindcss.com"></script>
+			<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+			<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+			<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+			<script src="https://unpkg.com/chart.js"></script>
+			<style>
+				#map {
+					height: 500px;
+					border-radius: 0.5rem;
+					box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+				}
+				.dark-mode {
+					@apply bg-slate-950 text-slate-100;
+				}
+				.card {
+					@apply bg-slate-900 border border-slate-700 rounded-lg p-6 shadow-lg;
+				}
+				.gauge-container {
+					@apply flex items-center justify-center;
+				}
+				.gauge {
+					position: relative;
+					width: 150px;
+					height: 150px;
+				}
+			</style>
+		</head>
+		<body class="dark-mode">
+			<div class="min-h-screen">
+				<!-- Header -->
+				<header class="bg-slate-900 border-b border-slate-700 sticky top-0 z-50">
+					<div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+						<div class="flex items-center space-x-3">
+							<div class="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg flex items-center justify-center">
+								<span class="text-white font-bold text-lg">Y</span>
+							</div>
+							<h1 class="text-2xl font-bold text-slate-100">Yieldi</h1>
+							<span class="text-slate-500 text-sm">Production Risk & Hedge Engine</span>
+						</div>
+						<div class="text-slate-400 text-sm">
+							Connected to Sentinel Hub
+						</div>
+					</div>
+				</header>
+
+				<!-- Main Content -->
+				<main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+					<!-- Map Section -->
+					<section class="space-y-4">
+						<div class="flex items-baseline space-x-2">
+							<h2 class="text-xl font-semibold text-slate-100">Field Selection</h2>
+							<p class="text-slate-500 text-sm">Draw a polygon or click to select your hectare</p>
+						</div>
+						<div id="map" hx-ext="sse" sse-connect="/api/events"></div>
+						<div id="map-controls" class="flex space-x-3">
+							<button class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition" onclick="enablePolygonDraw()">
+								Draw Polygon
+							</button>
+							<button class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded-lg font-medium transition" onclick="clearPolygon()">
+								Clear
+							</button>
+						</div>
+					</section>
+
+					<!-- Assessment Results -->
+					<section id="results" class="grid grid-cols-1 md:grid-cols-3 gap-6" hx-trigger="load" hx-swap="outerHTML">
+						@RiskCard(&RiskCardData{
+							Status:         "pending",
+							YieldEstimate:  0,
+							YieldBaseline:  0,
+							YieldDelta:     0,
+							CloudCover:     0,
+							LowConfidence:  false,
+						})
+						@HedgeGauge(&HedgeGaugeData{
+							HedgeRatio:     0,
+							Status:         "pending",
+							LowConfidence:  false,
+						})
+						@ConfidenceCard(&ConfidenceCardData{
+							CloudCover:    0,
+							NDVIAnomaly:   0,
+							Status:        "pending",
+						})
+					</section>
+
+					<!-- Charts Section -->
+					<section class="space-y-4">
+						<h2 class="text-xl font-semibold text-slate-100">Historical Analysis</h2>
+						<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+							<div class="card">
+								<h3 class="text-lg font-semibold text-slate-100 mb-4">NDVI Trend (5Y)</h3>
+								<canvas id="ndviChart"></canvas>
+							</div>
+							<div class="card">
+								<h3 class="text-lg font-semibold text-slate-100 mb-4">Yield Projection</h3>
+								<canvas id="yieldChart"></canvas>
+							</div>
+						</div>
+					</section>
+				</main>
+			</div>
+
+			<script>
+				let map;
+				let polygon;
+				let drawingMode = false;
+				const coordinates = [];
+
+				function initMap() {
+					map = L.map('map').setView([{ data.MapCenter[0] }, { data.MapCenter[1] }], { data.MapZoom });
+					L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+						attribution: '© OpenStreetMap',
+						maxZoom: 19,
+					}).addTo(map);
+
+					map.on('click', function(e) {
+						if (drawingMode) {
+							coordinates.push([e.latlng.lat, e.latlng.lng]);
+							updatePolygonPreview();
+						}
+					});
+				}
+
+				function enablePolygonDraw() {
+					drawingMode = !drawingMode;
+					coordinates.length = 0;
+					if (polygon) {
+						map.removeLayer(polygon);
+						polygon = null;
+					}
+					alert('Click on map to draw polygon. Double-click to finish.');
+				}
+
+				function updatePolygonPreview() {
+					if (polygon) {
+						map.removeLayer(polygon);
+					}
+
+					if (coordinates.length > 2) {
+						const closedCoords = [...coordinates, coordinates[0]];
+						polygon = L.polygon(closedCoords, {
+							color: '#22c55e',
+							fillColor: '#86efac',
+							fillOpacity: 0.3,
+							weight: 2,
+						}).addTo(map);
+
+						if (coordinates.length > 2) {
+							submitPolygon();
+						}
+					}
+				}
+
+				function clearPolygon() {
+					if (polygon) {
+						map.removeLayer(polygon);
+						polygon = null;
+					}
+					coordinates.length = 0;
+					drawingMode = false;
+				}
+
+				function submitPolygon() {
+					if (coordinates.length < 3) {
+						alert('Polygon must have at least 3 points');
+						return;
+					}
+
+					const geojson = {
+						type: 'Polygon',
+						coordinates: [coordinates.map(c => [c[1], c[0]])]
+					};
+
+					htmx.ajax('POST', '/api/assess', {
+						values: { geometry: JSON.stringify(geojson) },
+						target: '#results',
+						swap: 'outerHTML'
+					});
+				}
+
+				// Initialize on load
+				document.addEventListener('DOMContentLoaded', initMap);
+			</script>
+		</body>
+	</html>
+}

@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Yieldi - Grain Hedge Engine</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/leaflet-control-geocoder@3.3.1/dist/Control.Geocoder.min.css"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet-control-geocoder@3.3.1/dist/Control.Geocoder.min.js"></script>
+  </head>
+  <body>
+    <header>
+      <div class="header-container">
+        <svg
+          class="header-logo"
+          viewBox="0 0 600 600"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <defs>
+            <linearGradient
+              id="mainGrad"
+              x1="150"
+              y1="100"
+              x2="450"
+              y2="500"
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0%" stop-color="#FFE484" />
+              <stop offset="35%" stop-color="#EAA630" />
+              <stop offset="100%" stop-color="#A45C14" />
+            </linearGradient>
+
+            <g id="wheat-level">
+              <path
+                d="M -15,-40 Q -25,-80 -40,-130"
+                fill="none"
+                stroke="url(#mainGrad)"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+              <path
+                d="M 15,-40 Q 25,-80 40,-130"
+                fill="none"
+                stroke="url(#mainGrad)"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+
+              <path
+                d="M 0,0 C -22,-3 -32,-20 -15,-42 C -8,-25 -2,-10 0,0 Z"
+                fill="url(#mainGrad)"
+                stroke="#2A1808"
+                stroke-width="3"
+                stroke-linejoin="round"
+              />
+
+              <path
+                d="M 0,0 C 22,-3 32,-20 15,-42 C 8,-25 2,-10 0,0 Z"
+                fill="url(#mainGrad)"
+                stroke="#2A1808"
+                stroke-width="3"
+                stroke-linejoin="round"
+              />
+
+              <path
+                d="M -2,-5 C -8,-15 -12,-25 -10,-35"
+                fill="none"
+                stroke="#2A1808"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+              <path
+                d="M 2,-5 C 8,-15 12,-25 10,-35"
+                fill="none"
+                stroke="#2A1808"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </g>
+
+            <g id="top-kernel">
+              <path
+                d="M 0,-50 Q 0,-90 0,-140"
+                fill="none"
+                stroke="url(#mainGrad)"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+              <path
+                d="M -5,-45 Q -15,-80 -25,-110"
+                fill="none"
+                stroke="url(#mainGrad)"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+              <path
+                d="M 5,-45 Q 15,-80 25,-110"
+                fill="none"
+                stroke="url(#mainGrad)"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+
+              <path
+                d="M 0,0 C -12,-10 -10,-35 0,-50 C 10,-35 12,-10 0,0 Z"
+                fill="url(#mainGrad)"
+                stroke="#2A1808"
+                stroke-width="3"
+                stroke-linejoin="round"
+              />
+
+              <line
+                x1="0"
+                y1="-5"
+                x2="0"
+                y2="-40"
+                stroke="#2A1808"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </g>
+          </defs>
+
+          <g transform="translate(300, 340)">
+            <line
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="160"
+              stroke="url(#mainGrad)"
+              stroke-width="4.5"
+              stroke-linecap="round"
+            />
+
+            <path
+              d="M 0,150 C -18,140 -35,115 -45,80 C -30,110 -12,140 0,160 Z"
+              fill="url(#mainGrad)"
+              stroke="#2A1808"
+              stroke-width="2.5"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M 0,150 C 18,140 35,115 45,80 C 30,110 12,140 0,160 Z"
+              fill="url(#mainGrad)"
+              stroke="#2A1808"
+              stroke-width="2.5"
+              stroke-linejoin="round"
+            />
+
+            <use href="#wheat-level" x="0" y="140" />
+            <use href="#wheat-level" x="0" y="112" />
+            <use href="#wheat-level" x="0" y="84" />
+            <use href="#wheat-level" x="0" y="56" />
+            <use href="#wheat-level" x="0" y="28" />
+
+            <use href="#wheat-level" x="0" y="0" />
+
+            <g transform="rotate(-38)">
+              <line
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="-150"
+                stroke="url(#mainGrad)"
+                stroke-width="4.5"
+                stroke-linecap="round"
+              />
+              <use href="#wheat-level" x="0" y="-28" />
+              <use href="#wheat-level" x="0" y="-56" />
+              <use href="#wheat-level" x="0" y="-84" />
+              <use href="#wheat-level" x="0" y="-112" />
+              <use href="#wheat-level" x="0" y="-140" />
+              <use href="#top-kernel" x="0" y="-160" />
+            </g>
+
+            <g transform="rotate(38)">
+              <line
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="-150"
+                stroke="url(#mainGrad)"
+                stroke-width="4.5"
+                stroke-linecap="round"
+              />
+              <use href="#wheat-level" x="0" y="-28" />
+              <use href="#wheat-level" x="0" y="-56" />
+              <use href="#wheat-level" x="0" y="-84" />
+              <use href="#wheat-level" x="0" y="-112" />
+              <use href="#wheat-level" x="0" y="-140" />
+              <use href="#top-kernel" x="0" y="-160" />
+            </g>
+          </g>
+        </svg>
+        <div>
+          <h1 class="header-title">Yieldi</h1>
+          <p class="header-subtitle">Production Risk & Hedge Engine</p>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- Left Column: Control Panel & Results -->
+      <div class="main-left">
+        <!-- Control Panel -->
+        <div class="control-panel">
+          <div class="panel-section">
+            <h3 class="panel-title">Season Config</h3>
+            <div class="config-grid">
+              <div class="config-item">
+                <label title="Reference date for model (blank = today)"
+                  >Date</label
+                >
+                <input
+                  type="date"
+                  id="assessmentDate"
+                  class="config-input"
+                  title="For testing different points in season"
+                />
+              </div>
+              <div class="config-item">
+                <label title="Expected harvest date">Harvest Date</label>
+                <input
+                  type="date"
+                  id="harvestDate"
+                  class="config-input"
+                  title="Expected harvest date"
+                />
+              </div>
+              <div class="config-item">
+                <label title="Expected yield in good conditions"
+                  >Baseline (t/ha)</label
+                >
+                <input
+                  type="number"
+                  id="baselineYield"
+                  step="0.1"
+                  value="2.5"
+                  class="config-input"
+                  title="t/ha"
+                />
+              </div>
+              <div class="config-item">
+                <label title="Target hedge ratio as decimal">Hedge (%)</label>
+                <input
+                  type="number"
+                  id="targetHedge"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value="0.60"
+                  class="config-input"
+                  title="0-1 scale (0.60 = 60%)"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <h3 class="panel-title">Advanced: Model Tuning</h3>
+            <div class="panel-advanced">
+              <div class="formula-display">
+                <div class="formula-line">
+                  Yield = (α + β₁·NDVI_Δ·W + β₂·Rain_Δ·W) × Baseline
+                </div>
+                <div class="formula-line">
+                  Hedge = 0.60 × (Yield/Baseline) × W
+                </div>
+                <div class="formula-note">
+                  W = (D / SeasonDays)² | Δ = anomaly vs historical mean
+                </div>
+              </div>
+              <div class="preset-selector">
+                <label>Profile</label>
+                <select id="presetSelect" class="config-select">
+                  <option value="default">Mallee Wheat (Low Rain)</option>
+                  <option value="wa">WA Wheat (Semi-Arid)</option>
+                  <option value="irrigated">Murray Basin (Irrigated)</option>
+                  <option value="high_rainfall">
+                    High Rainfall Zone (South)
+                  </option>
+                </select>
+              </div>
+              <div class="config-grid-advanced">
+                <div class="config-item-advanced">
+                  <label
+                    title="Base yield floor (even in bad conditions). Increase for stable regions, decrease for high-risk."
+                    >α - Base Floor</label
+                  >
+                  <input
+                    type="number"
+                    id="alpha"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value="0.2"
+                    class="config-input"
+                  />
+                  <span class="param-hint">0.2 = 20% yield floor</span>
+                </div>
+                <div class="config-item-advanced">
+                  <label
+                    title="NDVI weight (satellite vegetation health). High for specialty crops, low for cloudy regions."
+                    >β₁ - NDVI Weight</label
+                  >
+                  <input
+                    type="number"
+                    id="beta1"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value="0.7"
+                    class="config-input"
+                  />
+                  <span class="param-hint"
+                    >Vegetation index sensitivity (0-1)</span
+                  >
+                </div>
+                <div class="config-item-advanced">
+                  <label
+                    title="Rainfall impact. High for dryland, low for irrigated."
+                    >β₂ - Rainfall</label
+                  >
+                  <input
+                    type="number"
+                    id="beta2"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value="0.1"
+                    class="config-input"
+                  />
+                  <span class="param-hint">Rain sensitivity (0-1)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-controls">
+            <button id="resetBtn" class="btn-slate-sm">Reset</button>
+            <button id="undoBtn" class="btn-slate-sm" style="display: none">
+              Undo
+            </button>
+            <button id="clearBtn" class="btn-slate-sm">Clear</button>
+            <button id="assessBtn" class="btn-green-sm" disabled>Assess</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Map -->
+      <div class="main-right">
+        <!-- Map Section -->
+        <div class="map-section">
+          <div class="map-section-header">
+            <h2>Draw Field</h2>
+            <div id="areaIndicator" class="area-indicator">
+              Area: <span id="areaValue">0</span> ha
+            </div>
+          </div>
+          <div id="map"></div>
+        </div>
+      </div>
+
+      <!-- Results Section -->
+      <div class="results-sticky">
+        <!-- Risk Card -->
+        <div class="card" id="riskCard">
+          <h3>Production Risk</h3>
+          <p class="status">Draw polygon to assess</p>
+        </div>
+
+        <!-- Hedge Card -->
+        <div class="card" id="hedgeCard">
+          <h3>Protection Strategy</h3>
+          <p class="status">Awaiting assessment</p>
+        </div>
+
+        <!-- Quality Card -->
+        <div class="card" id="qualityCard">
+          <h3>Data Quality</h3>
+          <p class="status">Draw polygon to start</p>
+        </div>
+      </div>
+    </main>
+
+    <script src="/static/script.js"></script>
+  </body>
+</html>

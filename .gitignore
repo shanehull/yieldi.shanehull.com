@@ -1,0 +1,39 @@
+# Build outputs
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+vendor/
+
+# Templ generated files
+internal/ui/*.go
+!internal/ui/*.templ
+
+# Testing
+*.test
+*.prof
+coverage.out
+
+# Temporary files
+tmp/
+temp/
