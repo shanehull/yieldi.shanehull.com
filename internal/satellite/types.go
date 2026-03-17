@@ -17,7 +17,8 @@ type ObservationData struct {
 }
 
 // AggregateObservations computes NDVI statistics from multiple scenes.
-// NDVI is calculated as: (NIR - Red) / (NIR + Red)
+// Uses cloud cover as a proxy for vegetation health.
+// Lower cloud cover indicates healthier crops; higher cloud cover indicates stress or poor conditions.
 func AggregateObservations(scenes []LandsatScene) *ObservationData {
 	if len(scenes) == 0 {
 		return &ObservationData{NDVI: 0, CloudCover: 0}
@@ -27,9 +28,16 @@ func AggregateObservations(scenes []LandsatScene) *ObservationData {
 	count := 0
 
 	for _, scene := range scenes {
-		// Use cloud cover as proxy for vegetation (lower clouds = healthier crop)
-		// Valid NDVI range: 0-1 for vegetation
-		ndvi := 0.65 - (scene.CloudCover * 0.15)
+		// Normalize cloud cover to 0-1 if it appears to be on 0-100 scale
+		cloudCover := scene.CloudCover
+		if cloudCover > 1.0 {
+			cloudCover = cloudCover / 100.0
+		}
+
+		// Estimate NDVI from cloud cover
+		// Lower cloud cover → higher vegetation health
+		// baseNDVI of 0.65 represents typical healthy wheat
+		ndvi := 0.65 - (cloudCover * 0.15)
 		if ndvi < 0 {
 			ndvi = 0
 		}
@@ -38,7 +46,7 @@ func AggregateObservations(scenes []LandsatScene) *ObservationData {
 		}
 
 		ndviSum += ndvi
-		cloudSum += scene.CloudCover
+		cloudSum += cloudCover
 		count++
 	}
 

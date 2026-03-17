@@ -51,6 +51,7 @@ type AssessResponse struct {
 	YieldBaseline      float64 `json:"yield_baseline"`
 	YieldDeltaPercent  float64 `json:"yield_delta_percent"`
 	HedgeRatio         float64 `json:"hedge_ratio"`
+	TargetHedgeRatio   float64 `json:"target_hedge_ratio"`
 	TotalYieldEstimate float64 `json:"total_yield_estimate"` // Field size × yield estimate
 	TotalHedgeVolume   float64 `json:"total_hedge_volume"`   // Field size × t/ha to protect
 	NDVIAnomaly        float64 `json:"ndvi_anomaly"`
@@ -228,6 +229,7 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 		YieldBaseline:      risk.YieldBaseline,
 		YieldDeltaPercent:  risk.YieldDeltaPercent,
 		HedgeRatio:         risk.HedgeRatio,
+		TargetHedgeRatio:   risk.TargetHedgeRatio,
 		TotalYieldEstimate: totalYieldEstimate,
 		TotalHedgeVolume:   totalHedgeVolume,
 		NDVIAnomaly:        ndviAnomalyVal,
