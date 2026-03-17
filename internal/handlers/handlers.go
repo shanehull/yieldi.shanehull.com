@@ -1,14 +1,16 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
-	"github.com/shanehull/yieldi/internal/quant"
-	"github.com/shanehull/yieldi/internal/satellite"
-	"github.com/shanehull/yieldi/internal/weather"
+	"github.com/shanehull/yieldi.shanehull.com/internal/quant"
+	"github.com/shanehull/yieldi.shanehull.com/internal/satellite"
+	"github.com/shanehull/yieldi.shanehull.com/internal/weather"
 )
 
 // Server holds the application state and dependencies.
@@ -49,7 +51,6 @@ type AssessResponse struct {
 	YieldBaseline      float64 `json:"yield_baseline"`
 	YieldDeltaPercent  float64 `json:"yield_delta_percent"`
 	HedgeRatio         float64 `json:"hedge_ratio"`
-	TargetHedgeRatio   float64 `json:"target_hedge_ratio"`
 	TotalYieldEstimate float64 `json:"total_yield_estimate"` // Field size × yield estimate
 	TotalHedgeVolume   float64 `json:"total_hedge_volume"`   // Field size × t/ha to protect
 	NDVIAnomaly        float64 `json:"ndvi_anomaly"`
@@ -98,6 +99,11 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default to current time if no assessment date provided
+	if assessmentDate.IsZero() {
+		assessmentDate = time.Now().UTC()
+	}
+
 	// Extract centroid from polygon for satellite and weather data
 	var centroidLat, centroidLon float64
 	polygonCoords, ok := geometry["coordinates"].([]interface{})
@@ -113,11 +119,15 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch historical NDVI
+	// Fetch historical NDVI relative to assessment date
 	startHistorical := time.Now()
-	historical, err := s.satelliteService.FetchHistoricalNDVI(r.Context(), centroidLat, centroidLon)
+	historical, err := s.satelliteService.FetchHistoricalNDVI(r.Context(), centroidLat, centroidLon, assessmentDate)
 	s.logger.Debug("historical NDVI fetch", "duration_ms", time.Since(startHistorical).Milliseconds(), "error", err)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			s.logger.Debug("historical NDVI fetch canceled by client")
+			return
+		}
 		s.logger.Error("failed to fetch historical ndvi", "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -125,11 +135,15 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch current NDVI
+	// Fetch current NDVI relative to assessment date
 	startCurrent := time.Now()
-	current, err := s.satelliteService.FetchCurrentNDVI(r.Context(), centroidLat, centroidLon)
+	current, err := s.satelliteService.FetchCurrentNDVI(r.Context(), centroidLat, centroidLon, assessmentDate)
 	s.logger.Debug("current NDVI fetch", "duration_ms", time.Since(startCurrent).Milliseconds(), "error", err)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			s.logger.Debug("current NDVI fetch canceled by client")
+			return
+		}
 		s.logger.Error("failed to fetch current ndvi", "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -143,11 +157,15 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 		ndviAnomalyVal = current.NDVIMean / historical.NDVIMean
 	}
 
-	// Fetch actual rainfall for current growing season and historical mean
+	// Fetch actual rainfall for current growing season and historical mean relative to assessment date
 	startRainfall := time.Now()
-	rainfallMetrics, err := s.weatherService.GetRainfallMetrics(r.Context(), centroidLat, centroidLon)
+	rainfallMetrics, err := s.weatherService.GetRainfallMetrics(r.Context(), centroidLat, centroidLon, assessmentDate)
 	s.logger.Debug("rainfall metrics fetch", "duration_ms", time.Since(startRainfall).Milliseconds(), "error", err)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			s.logger.Debug("weather data fetch canceled by client")
+			return
+		}
 		s.logger.Error("weather data fetch failed", "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -164,31 +182,39 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 		harvestDate = time.Now().UTC().AddDate(0, 0, req.SeasonDays)
 	}
 
+	// Create a local clone of the model for this request to ensure thread safety
+	model := *s.model
+
 	// Use coefficients from request
-	s.model.Alpha = req.Alpha
-	s.model.Beta1 = req.Beta1
-	s.model.Beta2 = req.Beta2
-	s.model.BaseHedgeTarget = req.TargetHedgeRatio
-	s.model.HarvestDate = harvestDate
-	s.model.TotalSeasonDays = req.SeasonDays
+	model.Alpha = req.Alpha
+	model.Beta1 = req.Beta1
+	model.Beta2 = req.Beta2
+	model.BaseHedgeTarget = req.TargetHedgeRatio
+	model.HarvestDate = harvestDate
+	model.TotalSeasonDays = req.SeasonDays
 
 	// Set reference date on model if provided
 	if !assessmentDate.IsZero() {
-		s.model.ReferenceDate = assessmentDate
+		model.ReferenceDate = assessmentDate
 	}
 
 	// Assess risk with baseline yield from request
-	risk := s.model.AssessRisk(
+	s.logger.Info("assessing production risk",
+		"asOf", assessmentDate.Format("2006-01-02"),
+		"lat", centroidLat,
+		"lon", centroidLon,
+		"ndvi_curr", current.NDVIMean,
+		"ndvi_hist", historical.NDVIMean,
+		"rain_curr", rainfallMetrics.CurrentTotal,
+		"rain_hist", rainfallMetrics.HistoricalMean)
+
+	risk := model.AssessRisk(
 		req.BaselineYield,
 		historical.NDVIMean,
 		current.NDVIMean,
 		rainfallMetrics.HistoricalMean,
 		rainfallMetrics.CurrentTotal,
-		current.CloudCover,
-	)
-	
-	// Reset reference date and restore default coefficients
-	s.model.ReferenceDate = time.Time{}
+		current.CloudCover)
 
 	// Calculate total yield and hedge volume based on field size
 	totalYieldEstimate := risk.YieldEstimate * req.FieldSizeHa
@@ -202,7 +228,6 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 		YieldBaseline:      risk.YieldBaseline,
 		YieldDeltaPercent:  risk.YieldDeltaPercent,
 		HedgeRatio:         risk.HedgeRatio,
-		TargetHedgeRatio:   risk.TargetHedgeRatio,
 		TotalYieldEstimate: totalYieldEstimate,
 		TotalHedgeVolume:   totalHedgeVolume,
 		NDVIAnomaly:        ndviAnomalyVal,

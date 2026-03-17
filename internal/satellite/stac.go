@@ -27,8 +27,6 @@ func NewSTACClient() *STACClient {
 	}
 }
 
-
-
 // SearchScenes queries S3 for Landsat Collection 2 Level 2 scenes.
 // Uses known WRS paths for Victoria, Australia (Path 91-93, Row 85-86).
 func (s *STACClient) SearchScenes(ctx context.Context, lat, lon float64, startDate, endDate string) ([]LandsatScene, error) {

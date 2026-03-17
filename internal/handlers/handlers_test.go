@@ -10,9 +10,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/shanehull/yieldi/internal/quant"
-	"github.com/shanehull/yieldi/internal/satellite"
-	"github.com/shanehull/yieldi/internal/weather"
+	"github.com/shanehull/yieldi.shanehull.com/internal/quant"
+	"github.com/shanehull/yieldi.shanehull.com/internal/satellite"
+	"github.com/shanehull/yieldi.shanehull.com/internal/weather"
 )
 
 func TestHandleAssessCoordinates(t *testing.T) {
@@ -23,7 +23,7 @@ func TestHandleAssessCoordinates(t *testing.T) {
 
 	// Create mock services
 	model := quant.NewYieldModel()
-	satelliteService := satellite.NewService(logger, "", "")
+	satelliteService := satellite.NewService(logger)
 	weatherService := weather.NewService(logger)
 
 	server := NewServer(model, satelliteService, weatherService, logger)

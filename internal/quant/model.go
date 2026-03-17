@@ -3,7 +3,7 @@ package quant
 import (
 	"time"
 
-	"github.com/shanehull/yieldi/internal/config"
+	"github.com/shanehull/yieldi.shanehull.com/internal/config"
 )
 
 // Model coefficients - calibrated by quantitative team, not user-configurable
@@ -32,6 +32,7 @@ func NewYieldModel() *YieldModel {
 
 // NewYieldModelWithConfig creates a model using regional configuration.
 // Model coefficients are fixed constants, only regional parameters vary.
+// Use NewYieldModel() for default configuration.
 func NewYieldModelWithConfig(cfg *config.SeasonConfig) *YieldModel {
 	return &YieldModel{
 		Alpha:           coefficientAlpha,
@@ -79,7 +80,7 @@ func (m *YieldModel) calculateTimeWeight(daysToHarvest int) float64 {
 func (m *YieldModel) EstimateYield(yieldBaseline, ndviAnomaly, rainfallDelta float64) float64 {
 	daysToHarvest := m.calculateDaysToHarvest()
 	w := m.calculateTimeWeight(daysToHarvest)
-	
+
 	multiplier := m.Alpha + (m.Beta1 * ndviAnomaly * w) + (m.Beta2 * rainfallDelta * w)
 	return multiplier * yieldBaseline
 }

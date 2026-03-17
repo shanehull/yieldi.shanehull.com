@@ -208,6 +208,29 @@
     </header>
 
     <main>
+      <!-- Right Column: Map -->
+      <div class="main-right">
+        <!-- Map Section -->
+        <div class="map-section">
+          <div class="map-section-header">
+            <div class="map-header-left">
+              <h2>Draw Field</h2>
+              <div id="areaIndicator" class="area-indicator">
+                Area: <span id="areaValue">0</span> ha
+              </div>
+            </div>
+            <div class="map-controls">
+              <button id="resetBtn" class="btn-slate-sm">Reset</button>
+              <button id="undoBtn" class="btn-slate-sm" style="display: none">
+                Undo
+              </button>
+              <button id="clearBtn" class="btn-slate-sm">Clear</button>
+            </div>
+          </div>
+          <div id="map"></div>
+        </div>
+      </div>
+
       <!-- Left Column: Control Panel & Results -->
       <div class="main-left">
         <!-- Control Panel -->
@@ -260,6 +283,11 @@
                   class="config-input"
                   title="0-1 scale (0.60 = 60%)"
                 />
+              </div>
+              <div class="panel-controls">
+                <button id="assessBtn" class="btn-green-sm" disabled>
+                  Assess
+                </button>
               </div>
             </div>
           </div>
@@ -343,29 +371,6 @@
               </div>
             </div>
           </div>
-
-          <div class="panel-controls">
-            <button id="resetBtn" class="btn-slate-sm">Reset</button>
-            <button id="undoBtn" class="btn-slate-sm" style="display: none">
-              Undo
-            </button>
-            <button id="clearBtn" class="btn-slate-sm">Clear</button>
-            <button id="assessBtn" class="btn-green-sm" disabled>Assess</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Right Column: Map -->
-      <div class="main-right">
-        <!-- Map Section -->
-        <div class="map-section">
-          <div class="map-section-header">
-            <h2>Draw Field</h2>
-            <div id="areaIndicator" class="area-indicator">
-              Area: <span id="areaValue">0</span> ha
-            </div>
-          </div>
-          <div id="map"></div>
         </div>
       </div>
 

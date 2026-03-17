@@ -19,7 +19,7 @@ RUN go install github.com/a-h/templ/cmd/templ@latest
 RUN templ generate ./internal/ui
 
 # Build binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o ./bin/yieldi ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o ./bin/yieldi ./cmd/server
 
 # Runtime stage
 FROM alpine:latest

@@ -7,8 +7,8 @@ import (
 
 // Item holds a cached value with expiration time
 type Item[T any] struct {
-	Value      T
-	ExpiresAt  time.Time
+	Value     T
+	ExpiresAt time.Time
 }
 
 // IsExpired checks if the item has expired
@@ -70,22 +70,4 @@ func (c *Cache[T]) Clear() {
 	c.items = make(map[string]*Item[T])
 }
 
-// Cleanup removes all expired items from the cache
-func (c *Cache[T]) Cleanup() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 
-	for key, item := range c.items {
-		if item.IsExpired() {
-			delete(c.items, key)
-		}
-	}
-}
-
-// Count returns the number of items in the cache
-func (c *Cache[T]) Count() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	return len(c.items)
-}

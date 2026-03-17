@@ -2,37 +2,27 @@ package satellite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/shanehull/yieldi/internal/cache"
+	"github.com/shanehull/yieldi.shanehull.com/internal/cache"
 )
 
 // Service orchestrates satellite data retrieval using STAC with in-memory caching.
 type Service struct {
 	stacClient *STACClient
 	logger     *slog.Logger
-	cache      *cache.Cache[[]LandsatScene]
+	cache      *cache.Cache[*VegetationMetrics]
 }
 
 // NewService creates a new satellite service using STAC (no credentials needed).
-func NewService(logger *slog.Logger, username, password string) *Service {
-	// Note: username and password are ignored for STAC
-	// STAC is free and public
+func NewService(logger *slog.Logger) *Service {
 	return &Service{
 		stacClient: NewSTACClient(),
 		logger:     logger,
-		cache:      cache.New[[]LandsatScene](),
-	}
-}
-
-// NewServiceWithToken creates a new satellite service using STAC (token ignored).
-func NewServiceWithToken(logger *slog.Logger, token string) *Service {
-	return &Service{
-		stacClient: NewSTACClient(),
-		logger:     logger,
-		cache:      cache.New[[]LandsatScene](),
+		cache:      cache.New[*VegetationMetrics](),
 	}
 }
 
@@ -45,100 +35,99 @@ type VegetationMetrics struct {
 	CollectionDate string
 }
 
-
-
-// FetchCurrentNDVI retrieves current season NDVI (last 60 days) with caching.
-func (s *Service) FetchCurrentNDVI(ctx context.Context, lat, lon float64) (*VegetationMetrics, error) {
-	now := time.Now()
-	cacheKey := fmt.Sprintf("current_%.4f_%.4f", lat, lon)
+// FetchCurrentNDVI retrieves NDVI for the 60 days preceding asOf with caching.
+func (s *Service) FetchCurrentNDVI(ctx context.Context, lat, lon float64, asOf time.Time) (*VegetationMetrics, error) {
+	if asOf.IsZero() {
+		asOf = time.Now()
+	}
+	// Round to 4 decimal places (~11m precision) to improve cache hits
+	cacheKey := fmt.Sprintf("current_%.4f_%.4f_%s", lat, lon, asOf.Format("2006-01-02"))
 
 	// Check cache first
-	if cachedScenes, ok := s.cache.Get(cacheKey); ok {
+	if metrics, ok := s.cache.Get(cacheKey); ok {
 		s.logger.Debug("cache hit", "key", cacheKey)
-		obs := AggregateObservations(cachedScenes)
-		return &VegetationMetrics{
-			NDVIMean:       obs.NDVI,
-			CloudCover:     obs.CloudCover,
-			DaysCount:      len(cachedScenes),
-			CollectionDate: now.Format("2006-01-02"),
-		}, nil
+		return metrics, nil
 	}
 
-	from := now.AddDate(0, 0, -60).Format("2006-01-02")
-	to := now.Format("2006-01-02")
+	from := asOf.AddDate(0, 0, -60).Format("2006-01-02")
+	to := asOf.Format("2006-01-02")
 
 	startScene := time.Now()
 	scenes, err := s.stacClient.SearchScenes(ctx, lat, lon, from, to)
-	s.logger.Debug("fetch current scenes", "duration_ms", time.Since(startScene).Milliseconds(), "count", len(scenes), "error", err)
+	s.logger.Debug("fetch current scenes", "asOf", asOf.Format("2006-01-02"), "duration_ms", time.Since(startScene).Milliseconds(), "count", len(scenes), "error", err)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(scenes) == 0 {
-		return nil, fmt.Errorf("no Landsat scenes found for location")
+		return nil, fmt.Errorf("no Landsat scenes found for location at %s", asOf.Format("2006-01-02"))
 	}
 
-	// Cache the scenes with 24-hour TTL
-	s.cache.Set(cacheKey, scenes, 24*time.Hour)
-
 	obs := AggregateObservations(scenes)
-
-	return &VegetationMetrics{
+	metrics := &VegetationMetrics{
 		NDVIMean:       obs.NDVI,
 		CloudCover:     obs.CloudCover,
 		DaysCount:      len(scenes),
-		CollectionDate: now.Format("2006-01-02"),
-	}, nil
+		CollectionDate: asOf.Format("2006-01-02"),
+	}
+
+	// Cache the processed metrics with 24-hour TTL
+	s.cache.Set(cacheKey, metrics, 24*time.Hour)
+
+	return metrics, nil
 }
 
-// FetchHistoricalNDVI retrieves 5 years of historical NDVI with caching.
-func (s *Service) FetchHistoricalNDVI(ctx context.Context, lat, lon float64) (*VegetationMetrics, error) {
-	now := time.Now()
-	cacheKey := fmt.Sprintf("historical_%.4f_%.4f", lat, lon)
+// FetchHistoricalNDVI retrieves 5 years of historical NDVI preceding the year of asOf.
+func (s *Service) FetchHistoricalNDVI(ctx context.Context, lat, lon float64, asOf time.Time) (*VegetationMetrics, error) {
+	if asOf.IsZero() {
+		asOf = time.Now()
+	}
+	// Round to 4 decimal places (~11m precision) to improve cache hits
+	cacheKey := fmt.Sprintf("historical_%.4f_%.4f_%d", lat, lon, asOf.Year())
 
-	// Check if all 5 years are cached
-	if cachedScenes, ok := s.cache.Get(cacheKey); ok {
+	// Check cache first
+	if metrics, ok := s.cache.Get(cacheKey); ok {
 		s.logger.Debug("cache hit", "key", cacheKey)
-		// Aggregate and return cached historical data
-		results := make([]*ObservationData, 1)
-		results[0] = AggregateObservations(cachedScenes)
-		return aggregateHistoricalMetrics(results), nil
+		return metrics, nil
 	}
 
 	years := 5
 	results := make([]*ObservationData, years)
-	allScenes := []LandsatScene{}
 
-	// Fetch data for each of the last 5 years sequentially
-	for i := 0; i < years; i++ {
-		year := now.Year() - i - 1
-		from := fmt.Sprintf("%d-04-01", year)          // Growing season start
-		to := fmt.Sprintf("%d-12-31", year)            // Full year through Dec 31
+	// Fetch data for each of the 5 years preceding the asOf year
+	for i := range years {
+		year := asOf.Year() - i - 1
+		from := fmt.Sprintf("%d-04-01", year) // Growing season start
+		to := fmt.Sprintf("%d-12-31", year)   // Full year through Dec 31
 
 		startYear := time.Now()
 		scenes, err := s.stacClient.SearchScenes(ctx, lat, lon, from, to)
 		s.logger.Debug("fetch historical scenes", "year", year, "duration_ms", time.Since(startYear).Milliseconds(), "count", len(scenes), "error", err)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil, err
+			}
 			s.logger.Warn("historical scenes fetch failed", "year", year, "error", err)
 			continue // Allow partial failures
 		}
 
 		if len(scenes) > 0 {
 			results[i] = AggregateObservations(scenes)
-			allScenes = append(allScenes, scenes...)
 		}
 
 		// Add small delay between requests to respect rate limits
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Cache all collected scenes with 30-day TTL (scenes change annually, but keep longer for consistency)
-	if len(allScenes) > 0 {
-		s.cache.Set(cacheKey, allScenes, 30*24*time.Hour)
-		s.logger.Debug("cached historical scenes", "key", cacheKey, "count", len(allScenes))
+	metrics := aggregateHistoricalMetrics(results)
+
+	// Cache the final averaged metrics with 30-day TTL
+	if metrics.DaysCount > 0 {
+		s.cache.Set(cacheKey, metrics, 30*24*time.Hour)
+		s.logger.Debug("cached historical metrics", "key", cacheKey)
 	}
 
-	return aggregateHistoricalMetrics(results), nil
+	return metrics, nil
 }
 
 // aggregateHistoricalMetrics combines 5 years of vegetation data.

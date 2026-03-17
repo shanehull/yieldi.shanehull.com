@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/shanehull/yieldi/internal/cache"
+	"github.com/shanehull/yieldi.shanehull.com/internal/cache"
 )
 
 // Service orchestrates weather data retrieval and processing.
@@ -27,39 +27,43 @@ func NewService(logger *slog.Logger) *Service {
 	}
 }
 
-// CurrentSeasonRainfall returns rainfall for the current growing season.
-// Growing season: April 1 to current date.
-func (s *Service) CurrentSeasonRainfall(ctx context.Context, lat, lon float64) (*RainfallData, error) {
-	now := time.Now()
-	year := now.Year()
+// CurrentSeasonRainfall returns rainfall for the current growing season relative to asOf.
+// Growing season: April 1 to asOf date.
+func (s *Service) CurrentSeasonRainfall(ctx context.Context, lat, lon float64, asOf time.Time) (*RainfallData, error) {
+	if asOf.IsZero() {
+		asOf = time.Now()
+	}
+	year := asOf.Year()
 
 	// Growing season starts April 1
 	seasonStart := time.Date(year, 4, 1, 0, 0, 0, 0, time.UTC)
 
 	// If we're before April, use previous year's start
-	if now.Before(seasonStart) {
+	if asOf.Before(seasonStart) {
 		seasonStart = time.Date(year-1, 4, 1, 0, 0, 0, 0, time.UTC)
 	}
 
 	start := seasonStart.Format("2006-01-02")
-	end := now.Format("2006-01-02")
+	end := asOf.Format("2006-01-02")
 
 	return s.client.FetchRainfallWithRetry(ctx, lat, lon, start, end, DefaultRetryConfig())
 }
 
-// HistoricalSeasonRainfall returns rainfall for the same growing season period across previous years.
-func (s *Service) HistoricalSeasonRainfall(ctx context.Context, lat, lon float64, years int) (*RainfallData, error) {
-	now := time.Now()
-	currentYear := now.Year()
+// HistoricalSeasonRainfall returns rainfall for the same growing season period relative to asOf.
+func (s *Service) HistoricalSeasonRainfall(ctx context.Context, lat, lon float64, years int, asOf time.Time) (*RainfallData, error) {
+	if asOf.IsZero() {
+		asOf = time.Now()
+	}
+	currentYear := asOf.Year()
 
 	// Determine current season dates
 	seasonStart := time.Date(currentYear, 4, 1, 0, 0, 0, 0, time.UTC)
-	if now.Before(seasonStart) {
+	if asOf.Before(seasonStart) {
 		seasonStart = time.Date(currentYear-1, 4, 1, 0, 0, 0, 0, time.UTC)
 	}
 
 	// Calculate the offset from April 1 to today
-	dayOfSeason := now.Sub(seasonStart).Hours() / 24
+	dayOfSeason := asOf.Sub(seasonStart).Hours() / 24
 
 	var eg errgroup.Group
 	results := make([]*RainfallData, years)
@@ -71,6 +75,7 @@ func (s *Service) HistoricalSeasonRainfall(ctx context.Context, lat, lon float64
 		endDate := startDate.AddDate(0, 0, int(dayOfSeason))
 
 		// Capture loop variables
+		yearVal := year
 		yearIdx := i
 		start := startDate.Format("2006-01-02")
 		end := endDate.Format("2006-01-02")
@@ -78,7 +83,7 @@ func (s *Service) HistoricalSeasonRainfall(ctx context.Context, lat, lon float64
 		eg.Go(func() error {
 			data, err := s.client.FetchRainfallWithRetry(ctx, lat, lon, start, end, DefaultRetryConfig())
 			if err != nil {
-				s.logger.Warn("historical rainfall fetch failed", "year", year, "error", err)
+				s.logger.Warn("historical rainfall fetch failed", "year", yearVal, "error", err)
 				return err
 			}
 			results[yearIdx] = data
@@ -117,8 +122,8 @@ func aggregateHistoricalRainfall(results []*RainfallData) *RainfallData {
 	}
 
 	aggregated.DailyValues = allDailyValues
-	aggregated.TotalRain = totalRain
-	aggregated.DaysCount = len(allDailyValues)
+	aggregated.TotalRain = totalRain / float64(validCount)  // Average across years
+	aggregated.DaysCount = len(allDailyValues) / validCount // Average days per season
 
 	if aggregated.DaysCount > 0 {
 		aggregated.MeanDaily = aggregated.TotalRain / float64(aggregated.DaysCount)
@@ -136,31 +141,34 @@ type RainfallMetrics struct {
 	LastUpdate     time.Time
 }
 
-// GetRainfallMetrics computes current season vs historical mean rainfall with caching.
-func (s *Service) GetRainfallMetrics(ctx context.Context, lat, lon float64) (*RainfallMetrics, error) {
-	cacheKey := fmt.Sprintf("rainfall_%.4f_%.4f", lat, lon)
+// GetRainfallMetrics computes current season vs historical mean rainfall relative to asOf.
+func (s *Service) GetRainfallMetrics(ctx context.Context, lat, lon float64, asOf time.Time) (*RainfallMetrics, error) {
+	if asOf.IsZero() {
+		asOf = time.Now()
+	}
+	cacheKey := fmt.Sprintf("rainfall_%.4f_%.4f_%s", lat, lon, asOf.Format("2006-01-02"))
 
-	// Check cache first (6-hour TTL since current rainfall changes daily)
+	// Check cache first
 	if metrics, ok := s.cache.Get(cacheKey); ok {
 		s.logger.Debug("cache hit", "key", cacheKey)
 		return metrics, nil
 	}
 
 	// Fetch current season
-	current, err := s.CurrentSeasonRainfall(ctx, lat, lon)
+	current, err := s.CurrentSeasonRainfall(ctx, lat, lon, asOf)
 	if err != nil {
 		return nil, fmt.Errorf("current season rainfall fetch failed: %w", err)
 	}
 
 	// Fetch historical (5 years)
-	historical, err := s.HistoricalSeasonRainfall(ctx, lat, lon, 5)
+	historical, err := s.HistoricalSeasonRainfall(ctx, lat, lon, 5, asOf)
 	if err != nil {
 		return nil, fmt.Errorf("historical rainfall fetch failed: %w", err)
 	}
 
 	// Calculate delta
 	delta := 0.0
-	if historical.MeanDaily > 0 {
+	if historical.TotalRain > 0 {
 		delta = (current.TotalRain - historical.TotalRain) / historical.TotalRain
 	}
 
@@ -169,11 +177,11 @@ func (s *Service) GetRainfallMetrics(ctx context.Context, lat, lon float64) (*Ra
 		HistoricalMean: historical.TotalRain,
 		RainfallDelta:  delta,
 		DataPoints:     current.DaysCount,
-		LastUpdate:     time.Now(),
+		LastUpdate:     asOf,
 	}
 
-	// Cache with 6-hour TTL
-	s.cache.Set(cacheKey, metrics, 6*time.Hour)
+	// Cache with 24-hour TTL for simulations
+	s.cache.Set(cacheKey, metrics, 24*time.Hour)
 
 	return metrics, nil
 }
