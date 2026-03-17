@@ -11,7 +11,9 @@ Yieldi estimates yield in real-time and calculates dynamic hedge ratios pre-harv
 - **Increases confidence** as harvest approaches, becoming more precise for hedging decisions
 - **Draw & Assess** any paddock on an interactive map to get instant yield and risk analysis
 
-The he"ge decision drives the amount of production to lock in at current prices, whether through futures, forwards, or other instruments.
+The hedge decision drives the amount of production to lock in at current prices, whether through futures, forwards, or other instruments.
+
+![Yieldi App Screenshot](assets/screenshot.jpg)
 
 ## Quick Start
 
