@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/shanehull/yieldi.shanehull.com/internal/cache"
@@ -94,30 +95,33 @@ func (s *Service) FetchHistoricalNDVI(ctx context.Context, lat, lon float64, asO
 	years := 5
 	results := make([]*ObservationData, years)
 
-	// Fetch data for each of the 5 years preceding the asOf year
+	// Fetch data for each of the 5 years preceding the asOf year concurrently
+	var wg sync.WaitGroup
 	for i := range years {
+		// Capture loop variables
+		idx := i
 		year := asOf.Year() - i - 1
 		from := fmt.Sprintf("%d-04-01", year) // Growing season start
 		to := fmt.Sprintf("%d-12-31", year)   // Full year through Dec 31
 
-		startYear := time.Now()
-		scenes, err := s.stacClient.SearchScenes(ctx, lat, lon, from, to)
-		s.logger.Debug("fetch historical scenes", "year", year, "duration_ms", time.Since(startYear).Milliseconds(), "count", len(scenes), "error", err)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil, err
+		wg.Go(func() {
+			startYear := time.Now()
+			scenes, err := s.stacClient.SearchScenes(ctx, lat, lon, from, to)
+			s.logger.Debug("fetch historical scenes", "year", year, "duration_ms", time.Since(startYear).Milliseconds(), "count", len(scenes), "error", err)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					s.logger.Warn("historical scenes fetch failed", "year", year, "error", err)
+				}
+				return
 			}
-			s.logger.Warn("historical scenes fetch failed", "year", year, "error", err)
-			continue // Allow partial failures
-		}
 
-		if len(scenes) > 0 {
-			results[i] = AggregateObservations(scenes)
-		}
-
-		// Add small delay between requests to respect rate limits
-		time.Sleep(500 * time.Millisecond)
+			if len(scenes) > 0 {
+				results[idx] = AggregateObservations(scenes)
+			}
+		})
 	}
+
+	wg.Wait()
 
 	metrics := aggregateHistoricalMetrics(results)
 

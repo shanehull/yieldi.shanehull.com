@@ -4,9 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 
 	"github.com/shanehull/yieldi.shanehull.com/internal/cache"
 )
@@ -65,10 +64,10 @@ func (s *Service) HistoricalSeasonRainfall(ctx context.Context, lat, lon float64
 	// Calculate the offset from April 1 to today
 	dayOfSeason := asOf.Sub(seasonStart).Hours() / 24
 
-	var eg errgroup.Group
+	var wg sync.WaitGroup
 	results := make([]*RainfallData, years)
 
-	// Fetch data for each previous year
+	// Fetch data for each previous year concurrently
 	for i := 0; i < years; i++ {
 		year := currentYear - i - 1
 		startDate := time.Date(year, 4, 1, 0, 0, 0, 0, time.UTC)
@@ -80,18 +79,17 @@ func (s *Service) HistoricalSeasonRainfall(ctx context.Context, lat, lon float64
 		start := startDate.Format("2006-01-02")
 		end := endDate.Format("2006-01-02")
 
-		eg.Go(func() error {
+		wg.Go(func() {
 			data, err := s.client.FetchRainfallWithRetry(ctx, lat, lon, start, end, DefaultRetryConfig())
 			if err != nil {
 				s.logger.Warn("historical rainfall fetch failed", "year", yearVal, "error", err)
-				return err
+				return
 			}
 			results[yearIdx] = data
-			return nil
 		})
 	}
 
-	_ = eg.Wait() // Allow partial failures, aggregate what we have
+	wg.Wait() // Allow partial failures, aggregate what we have
 
 	// Aggregate results
 	return aggregateHistoricalRainfall(results), nil

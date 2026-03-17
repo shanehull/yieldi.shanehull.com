@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/shanehull/yieldi.shanehull.com/internal/quant"
@@ -91,7 +92,7 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse geometry
-	var geometry map[string]interface{}
+	var geometry map[string]any
 	if err := json.Unmarshal([]byte(req.Geometry), &geometry); err != nil {
 		s.logger.Error("failed to parse geometry", "error", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -107,7 +108,7 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 
 	// Extract centroid from polygon for satellite and weather data
 	var centroidLat, centroidLon float64
-	polygonCoords, ok := geometry["coordinates"].([]interface{})
+	polygonCoords, ok := geometry["coordinates"].([]any)
 	if ok && len(polygonCoords) > 0 {
 		// Convert to float coordinates
 		var coords [][][]float64
@@ -120,35 +121,86 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch historical NDVI relative to assessment date
-	startHistorical := time.Now()
-	historical, err := s.satelliteService.FetchHistoricalNDVI(r.Context(), centroidLat, centroidLon, assessmentDate)
-	s.logger.Debug("historical NDVI fetch", "duration_ms", time.Since(startHistorical).Milliseconds(), "error", err)
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
+	// Fetch satellite and weather data concurrently
+	startFetch := time.Now()
+	var wg sync.WaitGroup
+	var historical, current *satellite.VegetationMetrics
+	var rainfallMetrics *weather.RainfallMetrics
+	var historicalErr, currentErr, rainfallErr error
+
+	// Fetch historical NDVI
+	wg.Go(func() {
+		startHistorical := time.Now()
+		h, err := s.satelliteService.FetchHistoricalNDVI(r.Context(), centroidLat, centroidLon, assessmentDate)
+		s.logger.Debug("historical NDVI fetch", "duration_ms", time.Since(startHistorical).Milliseconds(), "error", err)
+		if err != nil {
+			historicalErr = err
+			return
+		}
+		historical = h
+	})
+
+	// Fetch current NDVI
+	wg.Go(func() {
+		startCurrent := time.Now()
+		c, err := s.satelliteService.FetchCurrentNDVI(r.Context(), centroidLat, centroidLon, assessmentDate)
+		s.logger.Debug("current NDVI fetch", "duration_ms", time.Since(startCurrent).Milliseconds(), "error", err)
+		if err != nil {
+			currentErr = err
+			return
+		}
+		current = c
+	})
+
+	// Fetch rainfall metrics
+	wg.Go(func() {
+		startRainfall := time.Now()
+		r, err := s.weatherService.GetRainfallMetrics(r.Context(), centroidLat, centroidLon, assessmentDate)
+		s.logger.Debug("rainfall metrics fetch", "duration_ms", time.Since(startRainfall).Milliseconds(), "error", err)
+		if err != nil {
+			rainfallErr = err
+			return
+		}
+		rainfallMetrics = r
+	})
+
+	wg.Wait()
+	s.logger.Debug("all data fetches completed", "duration_ms", time.Since(startFetch).Milliseconds())
+
+	// Check for errors
+	if historicalErr != nil {
+		if errors.Is(historicalErr, context.Canceled) {
 			s.logger.Debug("historical NDVI fetch canceled by client")
 			return
 		}
-		s.logger.Error("failed to fetch historical ndvi", "error", err)
+		s.logger.Error("failed to fetch historical ndvi", "error", historicalErr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(AssessResponse{Error: "Failed to fetch satellite data"})
 		return
 	}
 
-	// Fetch current NDVI relative to assessment date
-	startCurrent := time.Now()
-	current, err := s.satelliteService.FetchCurrentNDVI(r.Context(), centroidLat, centroidLon, assessmentDate)
-	s.logger.Debug("current NDVI fetch", "duration_ms", time.Since(startCurrent).Milliseconds(), "error", err)
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
+	if currentErr != nil {
+		if errors.Is(currentErr, context.Canceled) {
 			s.logger.Debug("current NDVI fetch canceled by client")
 			return
 		}
-		s.logger.Error("failed to fetch current ndvi", "error", err)
+		s.logger.Error("failed to fetch current ndvi", "error", currentErr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(AssessResponse{Error: "Failed to fetch current NDVI"})
+		return
+	}
+
+	if rainfallErr != nil {
+		if errors.Is(rainfallErr, context.Canceled) {
+			s.logger.Debug("weather data fetch canceled by client")
+			return
+		}
+		s.logger.Error("weather data fetch failed", "error", rainfallErr)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(AssessResponse{Error: "Failed to fetch rainfall data"})
 		return
 	}
 
@@ -156,22 +208,6 @@ func (s *Server) HandleAssess(w http.ResponseWriter, r *http.Request) {
 	ndviAnomalyVal := 0.0
 	if historical.NDVIMean > 0 {
 		ndviAnomalyVal = current.NDVIMean / historical.NDVIMean
-	}
-
-	// Fetch actual rainfall for current growing season and historical mean relative to assessment date
-	startRainfall := time.Now()
-	rainfallMetrics, err := s.weatherService.GetRainfallMetrics(r.Context(), centroidLat, centroidLon, assessmentDate)
-	s.logger.Debug("rainfall metrics fetch", "duration_ms", time.Since(startRainfall).Milliseconds(), "error", err)
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			s.logger.Debug("weather data fetch canceled by client")
-			return
-		}
-		s.logger.Error("weather data fetch failed", "error", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(AssessResponse{Error: "Failed to fetch rainfall data"})
-		return
 	}
 
 	rainfallDeltaVal := rainfallMetrics.RainfallDelta
