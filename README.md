@@ -101,6 +101,30 @@ Units: t/ha (tonnes per hectare)
 
 Health check.
 
+## Shareable URLs
+
+Assessment results and configurations are encoded in the URL query string, allowing you to share analyses with others.
+
+**URL Parameters:**
+
+- `c` - Polygon coordinates (semicolon-separated lat,lng pairs): `c=-34.8704,143.4925;-34.8705,143.4930`
+- `ad` - Assessment date (YYYY-MM-DD): `ad=2025-09-15`
+- `hd` - Harvest date (YYYY-MM-DD): `hd=2025-11-15`
+- `by` - Baseline yield (t/ha): `by=2.5`
+- `th` - Target hedge ratio (0-1): `th=0.60`
+- `p` - Preset profile: `p=default` (options: `default`, `wa`, `irrigated`, `high_rainfall`)
+- `a` - Alpha coefficient: `a=0.2`
+- `b1` - Beta1 coefficient: `b1=0.7`
+- `b2` - Beta2 coefficient: `b2=0.1`
+
+**Example:**
+
+```
+https://yieldi.shanehull.com/?c=-34.858356,143.471340;-34.859060,143.501566;-34.901307,143.495384;-34.899758,143.488857;-34.897365,143.486625;-34.888635,143.484736;-34.873426,143.470138;-34.871455,143.466875;-34.866525,143.463268&ad=2025-09-15&hd=2025-11-30&by=2.5&th=0.60&p=default&a=0.2&b1=0.7&b2=0.1
+```
+
+**Usage:** The app automatically updates the URL as you draw polygons and adjust parameters. Copy the URL to share your exact assessment with colleagues.
+
 ## Model
 
 **Yield Estimation (Theta-Yield):**
