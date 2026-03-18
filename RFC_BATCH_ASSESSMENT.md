@@ -6,24 +6,68 @@
 
 ## Summary
 
-Enable the assessment of multiple field polygons in a single request, with efficient data fetching and per-polygon results. Currently, the API processes one polygon at a time, forcing clients to make sequential requests.
+Enable the assessment of multiple field polygons in a single request via file upload (GeoJSON/KML/KMZ/Shapefile) or JSON API, with efficient data fetching and per-polygon results. Currently, the API processes one polygon at a time, forcing clients to make sequential requests or draw fields manually.
 
 ## Problem Statement
 
 Farmers manage multiple paddocks. Current workflow:
 
-1. Draw polygon for field A
+1. Manually draw polygon for field A on web UI
 2. Wait for satellite/weather data fetch
 3. Get results for field A
 4. Clear map, repeat for field B, C, D...
+5. Or worse: export GIS file but no way to batch assess
 
-This is inefficient and doesn't leverage opportunities to reuse data for nearby locations.
+This is inefficient. Real workflows involve exporting field boundaries from GIS/farm management software (Agworld, AgWorld, QGIS, etc.).
 
 ## Proposed Solution
 
 ### API Changes
 
-**New endpoint:** `POST /api/assess-batch`
+**Two request methods:**
+
+#### Method 1: File Upload (Primary)
+
+**Endpoint:** `POST /api/assess-batch`
+
+**Content-Type:** `multipart/form-data`
+
+**Form fields:**
+
+- `file` - GeoJSON, KML, KMZ, or Shapefile (.zip containing .shp, .shx, .dbf)
+- `assessment_date` - Optional; RFC3339 format (default: now)
+- `harvest_date` - Required; YYYY-MM-DD format
+- `season_days` - Required; integer days
+- `baseline_yield` - Required; t/ha (applied to all features unless overridden by feature property)
+- `target_hedge` - Required; 0-1 scale
+- `alpha` - Optional; default 0.2
+- `beta1` - Optional; default 0.7
+- `beta2` - Optional; default 0.1
+
+**Feature properties in uploaded file** (optional, override defaults):
+
+GeoJSON/Shapefile features can include properties to override global parameters:
+
+```json
+{
+  "type": "Feature",
+  "properties": {
+    "id": "field_a",
+    "name": "North Paddock",
+    "baseline_yield": 2.5,
+    "target_hedge": 0.60
+  },
+  "geometry": {"type": "Polygon", "coordinates": [...]}
+}
+```
+
+If feature lacks `id`, use `name` or generate UUID.
+
+#### Method 2: JSON API (Alternative/Programmatic)
+
+**Endpoint:** `POST /api/assess-batch`
+
+**Content-Type:** `application/json`
 
 **Request format:**
 
@@ -52,12 +96,53 @@ This is inefficient and doesn't leverage opportunities to reuse data for nearby 
 }
 ```
 
-**Response format:**
+### Supported File Formats
+
+**Priority order (implementation):**
+
+1. **GeoJSON** (.geojson, .json)
+   - Native support, no external libs needed
+   - Features can include property overrides
+   - Widely exported from QGIS, ArcGIS, Agworld
+
+2. **KML** (.kml)
+   - Compress/extract if .kmz (standard ZIP)
+   - Parse Placemark/Polygon elements
+   - Property map from `<name>` and `<description>` tags
+
+3. **Shapefile** (.zip containing .shp, .shx, .dbf)
+   - Extract ZIP, parse using library (e.g., `github.com/jonas-p/go-shp`)
+   - Read attributes from .dbf file
+   - Support multi-part polygons
+
+**Validation:**
+
+- All features must be Polygon or MultiPolygon type
+- Minimum 3 points per polygon ring
+- Coordinates in [lon, lat] (WGS84)
+- Reject KML with > 100 features or Shapefiles > 10MB uncompressed
+
+**Error handling:**
+
+Return 400 with detailed message:
+
+```json
+{
+  "error": "File parsing failed",
+  "details": "Feature 'field_3' at index 2: Invalid geometry type. Expected Polygon, got Point"
+}
+```
+
+### Response Format (Both Methods)
 
 ```json
 {
   "assessment_date": "2025-09-15",
   "fetched_at": "2025-03-17T20:15:00Z",
+  "file_name": "fields.geojson",
+  "total_features": 2,
+  "successful": 2,
+  "failed": 0,
   "data_sources": {
     "location_1": {
       "centroid": {"lat": -34.87, "lon": 143.49},
@@ -92,6 +177,12 @@ This is inefficient and doesn't leverage opportunities to reuse data for nearby 
 }
 ```
 
+**New fields:**
+- `file_name` - Name of uploaded file (if file upload)
+- `total_features` - Total features parsed from file
+- `successful` - Number of successfully assessed polygons
+- `failed` - Number of failed polygons (included in results with `error` field)
+
 ### Data Fetching Strategy
 
 **Centroid clustering:** Group polygons by proximity (within 5km radius). Use a single satellite/weather fetch per cluster.
@@ -112,88 +203,156 @@ This is inefficient and doesn't leverage opportunities to reuse data for nearby 
 
 ```go
 type BatchAssessRequest struct {
-  AssessmentDate string `json:"assessment_date"`
-  HarvestDate    string `json:"harvest_date"`
-  SeasonDays     int    `json:"season_days"`
-  Polygons       []PolygonInput `json:"polygons"`
-  Alpha          float64 `json:"alpha"`
-  Beta1          float64 `json:"beta1"`
-  Beta2          float64 `json:"beta2"`
+  AssessmentDate string           `json:"assessment_date"`
+  HarvestDate    string           `json:"harvest_date"`
+  SeasonDays     int              `json:"season_days"`
+  Polygons       []PolygonInput   `json:"polygons"`
+  Alpha          float64          `json:"alpha"`
+  Beta1          float64          `json:"beta1"`
+  Beta2          float64          `json:"beta2"`
 }
 
 type PolygonInput struct {
   ID              string      `json:"id"`
-  Geometry        GeoJSON     `json:"geometry"`
+  Geometry        interface{} `json:"geometry"` // GeoJSON Polygon or MultiPolygon
   BaselineYield   float64     `json:"baseline_yield"`
   TargetHedge     float64     `json:"target_hedge"`
 }
 
 type DataSource struct {
-  Centroid           geo.Point
-  NDVIHistorical     float64
-  NDVICurrent        float64
-  RainfallHistorical float64
-  RainfallCurrent    float64
+  Centroid           [2]float64 `json:"centroid"` // [lat, lon]
+  NDVIHistorical     float64    `json:"ndvi_historical"`
+  NDVICurrent        float64    `json:"ndvi_current"`
+  RainfallHistorical float64    `json:"rainfall_historical"`
+  RainfallCurrent    float64    `json:"rainfall_current"`
 }
 
 type BatchAssessResponse struct {
-  AssessmentDate string                    `json:"assessment_date"`
-  FetchedAt      time.Time                 `json:"fetched_at"`
-  DataSources    map[string]DataSource     `json:"data_sources"`
-  Results        []AssessResponse          `json:"results"`
+  AssessmentDate string                 `json:"assessment_date"`
+  FetchedAt      time.Time              `json:"fetched_at"`
+  FileName       string                 `json:"file_name,omitempty"`
+  TotalFeatures  int                    `json:"total_features,omitempty"`
+  Successful     int                    `json:"successful"`
+  Failed         int                    `json:"failed"`
+  DataSources    map[string]DataSource  `json:"data_sources"`
+  Results        []AssessResponse       `json:"results"`
 }
 ```
 
-**New handler:** `HandleAssessBatch(w http.ResponseWriter, r *http.Request)`
+**New package `internal/geo/` for file parsing:**
 
-**New service method:** `Service.FetchBatchData(ctx context.Context, polygons []PolygonInput, asOf time.Time) map[string]DataSource`
+```go
+// internal/geo/parser.go
+type FileParser interface {
+  Parse(data []byte) ([]PolygonInput, error)
+}
+
+type GeoJSONParser struct{}
+func (p *GeoJSONParser) Parse(data []byte) ([]PolygonInput, error) { ... }
+
+type KMLParser struct{}
+func (p *KMLParser) Parse(data []byte) ([]PolygonInput, error) { ... }
+
+type ShapefileParser struct{}
+func (p *ShapefileParser) Parse(data []byte) ([]PolygonInput, error) { ... } // Expects ZIP
+
+func DetectAndParse(filename string, data []byte) ([]PolygonInput, error) {
+  // Detect format by extension and content
+  // Delegate to appropriate parser
+}
+```
+
+**New handlers:**
+
+- `HandleAssessBatch(w http.ResponseWriter, r *http.Request)` - Entry point for both file upload and JSON API
+  - Detects Content-Type (multipart/form-data vs application/json)
+  - Routes to appropriate parsing logic
+  
+**New service method in handlers:**
+
+- `assessBatchPolygons(ctx context.Context, polygons []PolygonInput, params BatchParams) ([]AssessResponse, error)`
+  - Implements centroid clustering
+  - Fetches data per cluster
+  - Applies model to each polygon
+  - Handles partial failures gracefully
 
 ### UI/UX Changes
 
-**Multi-polygon drawing:**
+**File upload interface:**
 
-- Allow drawing multiple polygons without clearing
-- Each polygon gets a unique color/ID
-- Display list of drawn polygons with their field sizes
+- Add "Upload File" button in control panel
+- Support drag-and-drop for GeoJSON/KML/KMZ/Shapefile
+- Show upload progress and parsing status
+- Display error if file is invalid (format, size, geometry)
 
-**Results display:**
+**Two workflows:**
 
-- Keep current sidebar for single polygon
-- Add polygon selector dropdown or list
-- Click polygon in list to view its results
-- Summary table showing all polygons:
-  | Field | Yield (t/ha) | vs Baseline | Hedge Ratio | Confidence |
-  | ----- | ------------ | ----------- | ----------- | ---------- |
-  | A | 2.27 | -9% | 54.5% | 100% |
-  | B | 2.45 | -2% | 58% | 100% |
+1. **File Upload (Primary)**
+   - User uploads GeoJSON/KML/Shapefile
+   - System parses and displays all features on map
+   - Form fields (baseline_yield, target_hedge, dates) apply to all features unless overridden in file properties
+   - Click "Assess All" to batch process
+
+2. **Manual Drawing (Existing)**
+   - Allow drawing multiple polygons without clearing
+   - Each polygon gets a unique color/ID
+   - Display list of drawn polygons with their field sizes
+   - Option to "Assess All" at the end
+
+**Results display (Batch):**
+
+- Keep current sidebar for quick view of first polygon
+- Add **polygon selector dropdown** or scrollable list
+- Click polygon in list to view its detailed results
+- **Summary table** showing all polygons:
+
+  | Field | Yield (t/ha) | vs Baseline | Hedge (t/ha) | Confidence | Days |
+  | ----- | ------------ | ----------- | ------------ | ---------- | ---- |
+  | A | 2.27 | -9% | 1.36 | 100% | 76 |
+  | B | 2.45 | -2% | 1.47 | 100% | 76 |
+
+- Click row to highlight polygon on map and show full details
 
 **Export functionality:**
 
-- Download results as CSV,JSON
+- Download results as **CSV** (tabular summary)
+- Download as **JSON** (full response including data_sources)
 - Include polygon ID, field size, all metrics
+- Bulk export with timestamp
 
 **Map interaction:**
 
 - Highlight polygon on hover
 - Click polygon to view its results
-- Optional: color-code by yield performance (red=low, green=high)
+- Color-code by yield performance:
+  - Green: > 10% above baseline
+  - Yellow: ±10% of baseline
+  - Red: > 10% below baseline
+- Show tooltip with field ID/name on hover
 
 ### Shareable URLs (Batch Assessment)
 
-Current URL encoding supports single polygons. For batch assessment, extend to support multiple polygons in URL state:
+**Single Polygon (≤5 polygons):**
 
-**URL Parameters (batch):**
+URL encoding supports direct polygon coordinates:
 
-- `c` - **Multiple polygons** (pipe-separated): `c=poly1_coords;poly1_id|poly2_coords;poly2_id`
-  - Example: `c=-34.8704,143.4925;-34.8705,143.4930;fieldA|-34.9000,143.5000;-34.9100,143.5100;fieldB`
-- Other parameters remain unchanged (single assessment_date, harvest_date, coefficients for all polygons)
+- `c` - Polygon coordinates (pipe-separated): `c=lat,lng;lat,lng;...`
+- `ad` - Assessment date, `hd` - Harvest date, `by` - Baseline yield, etc.
+- Example: `?c=-34.8704,143.4925;-34.8705,143.4930&ad=2025-09-15&hd=2025-11-15`
 
-**Alternative approach:** Generate single-use batch assessment ID stored server-side:
+**Multiple Polygons (>5 polygons):**
 
-- `bid=abc123def456` references stored batch with all polygon/config data
-- Cleaner URLs, but requires server-side state (consider for v2)
+URL length constraints (browser limit ~2000 chars) prevent encoding >5 polygons directly. For larger batches:
 
-**Recommendation:** Use pipe-separated approach for MVP. Simple, stateless, shareable URLs. Migrate to batch IDs if URL length becomes issue (>2000 chars).
+- **Use file upload workflow** — User uploads GeoJSON/KMZ, system assesses, returns results
+- **Do NOT include polygon coordinates in URL** — Prevents 100KB+ URLs
+
+**Future Enhancement (Phase 2):**
+
+Server-side batch result IDs:
+- `bid=abc123def456` references stored batch assessment with all polygons/config
+- Cleaner URLs, shorter, shareable indefinitely
+- Requires persistent database storage (results retained long-term)
 
 ### Backward Compatibility
 
@@ -214,12 +373,29 @@ Keep existing `/api/assess` endpoint unchanged. Single-polygon clients continue 
 
 **All polygons** in same request share same `assessment_date`, `harvest_date`, coefficients. No per-polygon overrides.
 
-### Testing
+### Testing Strategy
 
-- Unit tests for centroid clustering logic
-- Integration test with mock STAC/SILO (verify data reuse)
-- Test error cases (malformed geometry, missing fields, API failures)
-- Performance test with 50+ polygons
+**Test Data:**
+
+GeoJSON test files in `/static/test-data/`:
+
+**Hand-drawn (Real Paddocks):**
+- `mallee-single.geojson` — 1 paddock from Mallee, Victoria, baseline 2.5 t/ha, 60% hedge (quick smoke test)
+- `mallee-two-paddocks.geojson` — 2 adjacent paddocks from Mallee, Victoria (clustering test)
+
+**AI-derived (ePaddocks™ CSIRO):**
+- `moree-sample-small.geojson` — 11 paddocks from Moree, NSW (unit/integration tests)
+- `moree-sample.geojson` — 333 paddocks from Moree, NSW, range 1–595.5 ha (performance/scale tests)
+
+All features include properties: `id`, `name`, `baseline_yield`, `target_hedge`.
+
+**Test Cases:**
+
+- **Unit tests:** Centroid clustering logic, file parsing (GeoJSON validation)
+- **Integration tests:** File upload → parsing → clustering → batch assessment with mock STAC/SILO
+- **Error handling:** Malformed geometry, missing fields, API failures, partial failures (5 polygons, 1 fails)
+- **Performance:** 333 Moree paddocks → verify clustering reduces API calls, measure batch response time
+- **Format support:** GeoJSON parsing and validation (KML/Shapefile parsing tested separately)
 
 ### Performance Considerations
 
@@ -245,6 +421,15 @@ Keep existing `/api/assess` endpoint unchanged. Single-polygon clients continue 
 
 3. Should there be a maximum polygon limit?
    - **Recommendation:** Yes. Set to 100 per request to prevent abuse and API saturation.
+
+4. Which file format to prioritize first?
+   - **Recommendation:** GeoJSON (no external dependencies, widely supported, easiest parsing). Then KML (many GIS platforms export this). Shapefile last (requires ZIP handling + go-shp library).
+
+5. Should per-feature property overrides (baseline_yield, target_hedge) be supported?
+   - **Recommendation:** Yes, but optional. Allows power users to specify different yields/hedge ratios per field. Falls back to global defaults if feature properties missing.
+
+6. How to handle Shapefiles with missing DBF data?
+   - **Recommendation:** Generate feature IDs as "feature_0", "feature_1", etc. Use polygon index as fallback.
 
 ## References
 
