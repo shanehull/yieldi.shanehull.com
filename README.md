@@ -180,4 +180,4 @@ docker run -p 8080:8080 ghcr.io/shanehull/yieldi.shanehull.com:latest
 
 ## License
 
-Proprietary
+This project is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file for details.
