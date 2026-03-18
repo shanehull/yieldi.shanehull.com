@@ -13,7 +13,7 @@ Yieldi estimates yield in real-time and calculates dynamic hedge ratios pre-harv
 
 The hedge decision drives the amount of production to lock in at current prices, whether through futures, forwards, or other instruments.
 
-![Yieldi App Screenshot](assets/screenshot.jpg)
+![Yieldi App Screenshot](assets/screenshot.png)
 
 ## Quick Start
 
