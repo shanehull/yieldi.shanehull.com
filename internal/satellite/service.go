@@ -55,7 +55,11 @@ func (s *Service) FetchCurrentNDVI(ctx context.Context, lat, lon float64, asOf t
 
 	startScene := time.Now()
 	scenes, err := s.stacClient.SearchScenes(ctx, lat, lon, from, to)
-	s.logger.Debug("fetch current scenes", "asOf", asOf.Format("2006-01-02"), "duration_ms", time.Since(startScene).Milliseconds(), "count", len(scenes), "error", err)
+	sceneIDs := make([]string, len(scenes))
+	for i, s := range scenes {
+		sceneIDs[i] = s.EntityID
+	}
+	s.logger.Debug("fetch current scenes", "asOf", asOf.Format("2006-01-02"), "duration_ms", time.Since(startScene).Milliseconds(), "count", len(scenes), "scene_ids", sceneIDs, "error", err)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +68,18 @@ func (s *Service) FetchCurrentNDVI(ctx context.Context, lat, lon float64, asOf t
 		return nil, fmt.Errorf("no Landsat scenes found for location at %s", asOf.Format("2006-01-02"))
 	}
 
-	obs := AggregateObservations(scenes)
+	// Filter scenes by cloud cover with fallback thresholds
+	filtered := filterScenesByCloudCover(scenes, 60)
+	if len(filtered) == 0 {
+		// Fallback to 80% threshold
+		filtered = filterScenesByCloudCover(scenes, 80)
+	}
+	if len(filtered) == 0 {
+		// Last resort: use all scenes
+		filtered = scenes
+	}
+
+	obs := AggregateObservations(filtered)
 	metrics := &VegetationMetrics{
 		NDVIMean:       obs.NDVI,
 		CloudCover:     obs.CloudCover,
@@ -116,7 +131,15 @@ func (s *Service) FetchHistoricalNDVI(ctx context.Context, lat, lon float64, asO
 			}
 
 			if len(scenes) > 0 {
-				results[idx] = AggregateObservations(scenes)
+				// Filter scenes by cloud cover with fallback thresholds
+				filtered := filterScenesByCloudCover(scenes, 60)
+				if len(filtered) == 0 {
+					filtered = filterScenesByCloudCover(scenes, 80)
+				}
+				if len(filtered) == 0 {
+					filtered = scenes
+				}
+				results[idx] = AggregateObservations(filtered)
 			}
 		})
 	}
@@ -178,4 +201,15 @@ func aggregateHistoricalMetrics(results []*ObservationData) *VegetationMetrics {
 	agg.CollectionDate = time.Now().Format("2006-01-02")
 
 	return agg
+}
+
+// filterScenesByCloudCover returns scenes with cloud cover <= maxCloudCover (0-100 scale)
+func filterScenesByCloudCover(scenes []LandsatScene, maxCloudCover float64) []LandsatScene {
+	var filtered []LandsatScene
+	for _, scene := range scenes {
+		if scene.CloudCover <= maxCloudCover {
+			filtered = append(filtered, scene)
+		}
+	}
+	return filtered
 }

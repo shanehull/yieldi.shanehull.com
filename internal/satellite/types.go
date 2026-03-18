@@ -28,11 +28,8 @@ func AggregateObservations(scenes []LandsatScene) *ObservationData {
 	count := 0
 
 	for _, scene := range scenes {
-		// Normalize cloud cover to 0-1 if it appears to be on 0-100 scale
-		cloudCover := scene.CloudCover
-		if cloudCover > 1.0 {
-			cloudCover = cloudCover / 100.0
-		}
+		// Normalize cloud cover from STAC 0-100 scale to 0-1
+		cloudCover := scene.CloudCover / 100.0
 
 		// Estimate NDVI from cloud cover
 		// Lower cloud cover → higher vegetation health
