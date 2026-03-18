@@ -458,21 +458,7 @@ function setupEventListeners() {
 function initMap() {
   map = L.map("map").setView([-37.7, 145.0], 8);
 
-  L.tileLayer(
-    "https://cdn.jsdelivr.net/npm/esri-leaflet@3/dist/esri-leaflet.js",
-    {
-      attribution: "Esri",
-      maxZoom: 19,
-    },
-  ).addTo(map);
-
-  L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    {
-      attribution: "Esri",
-      maxZoom: 19,
-    },
-  ).addTo(map);
+  L.esri.basemapLayer("Imagery", { maxZoom: 18 }).addTo(map);
 
   // Set drawing mode active by default
   document.getElementById("map").classList.add("drawing");
