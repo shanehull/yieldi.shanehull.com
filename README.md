@@ -1,5 +1,10 @@
 # Yieldi
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/shanehull/yieldi.shanehull.com)](https://goreportcard.com/report/github.com/shanehull/yieldi.shanehull.com)
+
+[![Lint](https://github.com/shanehull/yieldi.shanehull.com/actions/workflows/lint.yaml/badge.svg)](https://github.com/shanehull/yieldi.shanehull.com/actions/workflows/lint.yaml)
+[![Release](https://img.shields.io/github/v/release/shanehull/yieldi.shanehull.com)](https://github.com/shanehull/yieldi.shanehull.com/releases)
+
 Quantitative grain risk engine that estimates yield in real-time and calculates dynamic hedge ratios pre-harvest.
 
 ## What It Does
