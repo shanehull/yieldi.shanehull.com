@@ -127,6 +127,29 @@ main {
   cursor: grab;
 }
 
+.map-section.fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  border-radius: 0;
+  margin: 0;
+}
+
+.map-section.fullscreen #map {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+
+#fullscreenBtn {
+  padding: 0.4rem 0.55rem;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
 h1 {
   font-size: 1.875rem;
   font-weight: bold;
