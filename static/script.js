@@ -4,8 +4,12 @@ let map,
   pointMarkers = [],
   drawingMode = true,
   coordinates = [],
+  selectedPointIndex = -1,
+  undoStack = [],
+  redoStack = [],
   isDraggingPoint = false,
   draggingPointIndex = -1,
+  dragStartCoord = null,
   fieldSizeHa = 0,
   currentAbortController = null;
 
@@ -180,7 +184,7 @@ const presets = {
   },
 };
 
-function addPointMarker(latlng, index) {
+function addPointMarker(latlng, displayIndex, arrayIndex) {
   const marker = L.circleMarker(latlng, {
     radius: 10,
     fillColor: "#22c55e",
@@ -193,25 +197,43 @@ function addPointMarker(latlng, index) {
 
   marker.on("mousedown", function (e) {
     isDraggingPoint = true;
-    draggingPointIndex = index - 1;
+    draggingPointIndex = pointMarkers.indexOf(this);
+    dragStartCoord = [...coordinates[draggingPointIndex]];
     map.dragging.disable();
     L.DomEvent.stop(e);
   });
 
   marker.on("click", function (e) {
     L.DomEvent.stop(e);
+    const idx = pointMarkers.indexOf(this);
+    if (selectedPointIndex === idx) {
+      deselectPoint();
+    } else {
+      selectPoint(idx);
+    }
   });
 
   marker.on("dblclick", function (e) {
     L.DomEvent.stop(e);
   });
 
+  marker.on("contextmenu", function (e) {
+    L.DomEvent.stop(e);
+    L.DomEvent.preventDefault(e);
+    const idx = pointMarkers.indexOf(this);
+    if (idx >= 0) executeDelete(idx);
+  });
+
   marker.on("mouseover", function () {
-    this.setStyle({ fillColor: "#16a34a", radius: 12 });
+    if (pointMarkers.indexOf(this) !== selectedPointIndex) {
+      this.setStyle({ fillColor: "#16a34a", radius: 12 });
+    }
   });
 
   marker.on("mouseout", function () {
-    this.setStyle({ fillColor: "#22c55e", radius: 10 });
+    if (pointMarkers.indexOf(this) !== selectedPointIndex) {
+      this.setStyle({ fillColor: "#22c55e", color: "#16a34a", radius: 10 });
+    }
   });
 
   const tooltip = L.tooltip({
@@ -219,21 +241,18 @@ function addPointMarker(latlng, index) {
     direction: "center",
     className: "point-label",
   })
-    .setContent(String(index))
+    .setContent(String(displayIndex))
     .setLatLng(latlng);
   marker.bindTooltip(tooltip);
 
-  marker.bindPopup(
-    `Point ${index}<br/>${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`,
-    { closeButton: false },
-  );
-  pointMarkers.push(marker);
+  const pos = arrayIndex !== undefined ? arrayIndex : pointMarkers.length;
+  pointMarkers.splice(pos, 0, marker);
 }
 
-function updatePointCounter() {
-  // Show/hide undo button based on whether points exist
-  document.getElementById("undoBtn").style.display =
-    coordinates.length > 0 ? "block" : "none";
+function updateButtons() {
+  document.getElementById("undoBtn").disabled = undoStack.length === 0;
+  document.getElementById("redoBtn").disabled = redoStack.length === 0;
+  document.getElementById("deleteBtn").disabled = selectedPointIndex < 0;
 }
 
 function updatePreview() {
@@ -273,13 +292,16 @@ function updatePreview() {
   } else {
     document.getElementById("assessBtn").disabled = true;
   }
-  updatePointCounter();
+  updateButtons();
   updateURL();
 }
 
 function cancelDrawing() {
   drawingMode = true;
   coordinates = [];
+  undoStack = [];
+  redoStack = [];
+  selectedPointIndex = -1;
   fieldSizeHa = 0;
   pointMarkers.forEach((m) => map.removeLayer(m));
   pointMarkers = [];
@@ -290,7 +312,108 @@ function cancelDrawing() {
   document.getElementById("areaIndicator").style.display = "none";
   const status = document.getElementById("drawStatus");
   if (status) status.textContent = "";
+  updateButtons();
   updateURL();
+}
+
+function selectPoint(index) {
+  deselectPoint();
+  selectedPointIndex = index;
+  pointMarkers[index].setStyle({
+    fillColor: "#fbbf24",
+    color: "#f59e0b",
+    radius: 13,
+  });
+  updateButtons();
+}
+
+function deselectPoint() {
+  if (selectedPointIndex >= 0 && pointMarkers[selectedPointIndex]) {
+    pointMarkers[selectedPointIndex].setStyle({
+      fillColor: "#22c55e",
+      color: "#16a34a",
+      radius: 10,
+    });
+  }
+  selectedPointIndex = -1;
+  updateButtons();
+}
+
+function executeAdd(coord, index) {
+  redoStack = [];
+  undoStack.push({ type: "delete", coord, index });
+  coordinates.splice(index, 0, coord);
+  addPointMarker({ lat: coord[0], lng: coord[1] }, index + 1, index);
+  updatePreview();
+}
+
+function executeDelete(index) {
+  redoStack = [];
+  undoStack.push({ type: "add", coord: coordinates[index], index });
+  coordinates.splice(index, 1);
+  const marker = pointMarkers.splice(index, 1)[0];
+  map.removeLayer(marker);
+  renumberMarkers();
+  deselectPoint();
+  updatePreview();
+  updateButtons();
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  const action = undoStack.pop();
+  redoStack.push(action);
+
+  if (action.type === "drag") {
+    coordinates[action.index] = action.from;
+    pointMarkers[action.index].setLatLng(action.from);
+  } else if (action.type === "delete") {
+    coordinates.splice(action.index, 1);
+    const marker = pointMarkers.splice(action.index, 1)[0];
+    map.removeLayer(marker);
+    renumberMarkers();
+  } else {
+    coordinates.splice(action.index, 0, action.coord);
+    addPointMarker(
+      { lat: action.coord[0], lng: action.coord[1] },
+      action.index + 1,
+      action.index,
+    );
+  }
+  deselectPoint();
+  updatePreview();
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  const action = redoStack.pop();
+  undoStack.push(action);
+
+  if (action.type === "drag") {
+    coordinates[action.index] = action.to;
+    pointMarkers[action.index].setLatLng(action.to);
+  } else if (action.type === "delete") {
+    coordinates.splice(action.index, 0, action.coord);
+    addPointMarker(
+      { lat: action.coord[0], lng: action.coord[1] },
+      action.index + 1,
+      action.index,
+    );
+  } else {
+    coordinates.splice(action.index, 1);
+    const marker = pointMarkers.splice(action.index, 1)[0];
+    map.removeLayer(marker);
+    renumberMarkers();
+  }
+  deselectPoint();
+  updatePreview();
+}
+
+function renumberMarkers() {
+  pointMarkers.forEach((m, i) => {
+    const tooltip = m.getTooltip();
+    if (tooltip) tooltip.setContent(String(i + 1));
+  });
 }
 
 function finishDrawing() {
@@ -303,7 +426,10 @@ function finishDrawing() {
   if (status) status.textContent = "";
   pointMarkers.forEach((m) => map.removeLayer(m));
   pointMarkers = [];
-  document.getElementById("undoBtn").style.display = "none";
+  undoStack = [];
+  redoStack = [];
+  selectedPointIndex = -1;
+  updateButtons();
   updateURL();
 }
 
@@ -334,23 +460,12 @@ function setupEventListeners() {
 
   document.getElementById("clearBtn").addEventListener("click", cancelDrawing);
 
-  document.getElementById("undoBtn").addEventListener("click", function () {
-    if (coordinates.length === 0) return;
+  document.getElementById("undoBtn").addEventListener("click", undo);
 
-    coordinates.pop();
+  document.getElementById("redoBtn").addEventListener("click", redo);
 
-    if (pointMarkers.length > 0) {
-      const lastMarker = pointMarkers.pop();
-      map.removeLayer(lastMarker);
-    }
-
-    updatePreview();
-    updatePointCounter();
-    updateURL();
-
-    if (coordinates.length === 0) {
-      document.getElementById("undoBtn").style.display = "none";
-    }
+  document.getElementById("deleteBtn").addEventListener("click", function () {
+    if (selectedPointIndex >= 0) executeDelete(selectedPointIndex);
   });
 
   // Input changes
@@ -471,7 +586,7 @@ function initMap() {
 
   // Set drawing mode active by default
   document.getElementById("map").classList.add("drawing");
-  updatePointCounter();
+  updateButtons();
 
   // Parse URL parameters to initialize state
   parseURLParams();
@@ -512,10 +627,23 @@ function initMap() {
   document.addEventListener("mouseup", function () {
     if (isDraggingPoint) {
       isDraggingPoint = false;
+      const idx = draggingPointIndex;
       draggingPointIndex = -1;
       map.dragging.enable();
 
-      // Final update after drag finishes
+      const moved = dragStartCoord &&
+        (dragStartCoord[0] !== coordinates[idx][0] ||
+         dragStartCoord[1] !== coordinates[idx][1]);
+      if (moved) {
+        redoStack = [];
+        undoStack.push({
+          type: "drag",
+          index: idx,
+          from: dragStartCoord,
+          to: [...coordinates[idx]],
+        });
+      }
+      dragStartCoord = null;
       updatePreview();
       updateURL();
     }
@@ -523,7 +651,6 @@ function initMap() {
 
   map.on("click", (e) => {
     if (drawingMode && !isDraggingPoint) {
-      // Check if we are too close to any existing point (20px threshold)
       const clickPoint = map.latLngToLayerPoint(e.latlng);
       const isNearExisting = coordinates.some((coord) => {
         const p = map.latLngToLayerPoint(coord);
@@ -531,9 +658,8 @@ function initMap() {
       });
 
       if (!isNearExisting) {
-        coordinates.push([e.latlng.lat, e.latlng.lng]);
-        addPointMarker(e.latlng, coordinates.length);
-        updatePreview();
+        deselectPoint();
+        executeAdd([e.latlng.lat, e.latlng.lng], coordinates.length);
       }
     }
   });
@@ -560,9 +686,29 @@ function initMap() {
         return;
       }
       if (drawingMode) cancelDrawing();
+      deselectPoint();
     }
     if (e.key === "Enter" && drawingMode && coordinates.length >= 3)
       finishDrawing();
+    if (drawingMode) {
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selectedPointIndex >= 0) {
+          e.preventDefault();
+          executeDelete(selectedPointIndex);
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key === "y" || (e.key === "z" && e.shiftKey))
+      ) {
+        e.preventDefault();
+        redo();
+      }
+    }
   });
 
   setupEventListeners();

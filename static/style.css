@@ -488,6 +488,11 @@ input[type="date"]::-webkit-inner-spin-button {
   border-color: #64748b;
 }
 
+.btn-slate-sm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .btn-green-sm {
   background: #16a34a;
   color: white;
