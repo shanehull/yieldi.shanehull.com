@@ -455,6 +455,15 @@ function setupEventListeners() {
   });
 }
 
+function toggleMapFullscreen() {
+  const section = document.querySelector(".map-section");
+  const btn = document.getElementById("fullscreenBtn");
+  const isFullscreen = section.classList.toggle("fullscreen");
+  document.body.style.overflow = isFullscreen ? "hidden" : "";
+  btn.textContent = "\u26F6";
+  setTimeout(() => map.invalidateSize(), 100);
+}
+
 function initMap() {
   map = L.map("map").setView([-37.7, 145.0], 8);
 
@@ -541,8 +550,17 @@ function initMap() {
     observer.observe(geocoderContainer, { childList: true, subtree: true });
   }
 
+  document.getElementById("fullscreenBtn").addEventListener("click", toggleMapFullscreen);
+
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && drawingMode) cancelDrawing();
+    if (e.key === "Escape") {
+      const section = document.querySelector(".map-section");
+      if (section.classList.contains("fullscreen")) {
+        toggleMapFullscreen();
+        return;
+      }
+      if (drawingMode) cancelDrawing();
+    }
     if (e.key === "Enter" && drawingMode && coordinates.length >= 3)
       finishDrawing();
   });
