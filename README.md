@@ -135,14 +135,14 @@ https://yieldi.shanehull.com/?c=-34.858356,143.471340;-34.859060,143.501566;-34.
 Time-weighted estimation that increases confidence as harvest approaches.
 
 ```
-Yield_est = (α + (β1 * NDVI_Anomaly * W) + (β2 * Rainfall_Delta * W)) * Yield_baseline
+Yield_est = (1 + (β1 * NDVI_Anomaly * W) + (β2 * Rainfall_Delta * W)) * Yield_baseline
 ```
 
 Where:
 
-- α = 0.2, β1 = 0.7, β2 = 0.1 (fixed coefficients)
+- α = 0.2 (yield floor, as fraction of baseline), β1 = 0.7, β2 = 0.1 (fixed coefficients)
 - W = time-decay weight = (Days_to_Harvest / Season_Days)²
-- NDVI_Anomaly = Current_NDVI / Historical_Mean_NDVI
+- NDVI_Anomaly = (Current_NDVI / Historical_Mean_NDVI) - 1, 0.0 at average
 - Rainfall_Delta = (Current_Rainfall - Historical_Mean) / Historical_Mean
 
 **Hedge Ratio:**

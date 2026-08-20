@@ -5,8 +5,16 @@ import (
 	"testing"
 )
 
+// newTestModel returns a model with a fixed reference date at season start
+// so days-to-harvest equals TotalSeasonDays, making W = 1 deterministically.
+func newTestModel() *YieldModel {
+	m := NewYieldModel()
+	m.ReferenceDate = m.HarvestDate.AddDate(0, 0, -m.TotalSeasonDays)
+	return m
+}
+
 func TestEstimateYield(t *testing.T) {
-	model := NewYieldModel()
+	model := newTestModel()
 
 	tests := []struct {
 		name           string
@@ -18,34 +26,34 @@ func TestEstimateYield(t *testing.T) {
 		{
 			name:          "Baseline conditions",
 			yieldBaseline: 2.5,
-			ndviAnomaly:   1.0,
+			ndviAnomaly:   0.0,
 			rainfallDelta: 0.0,
-			// (0.2 + 0.7*1.0 + 0.1*0.0) * 2.5 = 0.9 * 2.5 = 2.25
-			expectedResult: 2.25,
+			// (1 + 0.7*0.0 + 0.1*0.0) * 2.5 = 1.0 * 2.5 = 2.5
+			expectedResult: 2.5,
 		},
 		{
 			name:          "Positive NDVI anomaly",
 			yieldBaseline: 2.5,
-			ndviAnomaly:   1.1,
+			ndviAnomaly:   0.1,
 			rainfallDelta: 0.0,
-			// (0.2 + 0.7*1.1 + 0.1*0.0) * 2.5 = 0.97 * 2.5 = 2.425
-			expectedResult: 2.425,
+			// (1 + 0.7*0.1 + 0.1*0.0) * 2.5 = 1.07 * 2.5 = 2.675
+			expectedResult: 2.675,
 		},
 		{
 			name:          "Negative rainfall delta",
 			yieldBaseline: 2.5,
-			ndviAnomaly:   1.0,
+			ndviAnomaly:   0.0,
 			rainfallDelta: -0.2,
-			// (0.2 + 0.7*1.0 + 0.1*-0.2) * 2.5 = 0.88 * 2.5 = 2.2
-			expectedResult: 2.2,
+			// (1 + 0.7*0.0 + 0.1*-0.2) * 2.5 = 0.98 * 2.5 = 2.45
+			expectedResult: 2.45,
 		},
 		{
 			name:          "Combined positive anomalies",
 			yieldBaseline: 2.6,
-			ndviAnomaly:   1.05,
+			ndviAnomaly:   0.05,
 			rainfallDelta: 0.15,
-			// (0.2 + 0.7*1.05 + 0.1*0.15) * 2.6 = 0.95 * 2.6 = 2.47
-			expectedResult: 2.47,
+			// (1 + 0.7*0.05 + 0.1*0.15) * 2.6 = 1.05 * 2.6 = 2.73
+			expectedResult: 2.73,
 		},
 	}
 
@@ -59,8 +67,19 @@ func TestEstimateYield(t *testing.T) {
 	}
 }
 
+func TestEstimateYieldAlphaFloor(t *testing.T) {
+	model := newTestModel()
+
+	// Severe negative anomalies should be floored at the Alpha yield floor
+	result := model.EstimateYield(2.5, -1.0, -1.0)
+	expected := 0.2 * 2.5 // alpha floor * baseline
+	if !floatEqual(result, expected) {
+		t.Errorf("expected yield floored at %.2f, got %.2f", expected, result)
+	}
+}
+
 func TestCalculateHedgeRatio(t *testing.T) {
-	model := NewYieldModel()
+	model := newTestModel()
 
 	tests := []struct {
 		name           string
@@ -108,7 +127,7 @@ func TestCalculateHedgeRatio(t *testing.T) {
 }
 
 func TestAssessRisk(t *testing.T) {
-	model := NewYieldModel()
+	model := newTestModel()
 
 	risk := model.AssessRisk(
 		2.5,   // yieldBaseline
@@ -127,6 +146,12 @@ func TestAssessRisk(t *testing.T) {
 		t.Errorf("expected low confidence false, got true")
 	}
 
+	// 5% above-average NDVI and neutral rainfall should give a small positive estimate
+	expectedNDVIAnomaly := (0.63 / 0.6) - 1
+	if math.Abs(risk.NDVIAnomaly-expectedNDVIAnomaly) > 1e-9 {
+		t.Errorf("unexpected NDVI anomaly: %.4f", risk.NDVIAnomaly)
+	}
+
 	// Hedge ratio should be clamped to [0, 1]
 	if risk.HedgeRatio < 0 || risk.HedgeRatio > 1 {
 		t.Errorf("hedge ratio out of bounds: %.2f", risk.HedgeRatio)
@@ -134,7 +159,7 @@ func TestAssessRisk(t *testing.T) {
 }
 
 func TestAssessRiskHighCloudCover(t *testing.T) {
-	model := NewYieldModel()
+	model := newTestModel()
 
 	risk := model.AssessRisk(
 		2.5,   // yieldBaseline
@@ -151,7 +176,7 @@ func TestAssessRiskHighCloudCover(t *testing.T) {
 }
 
 func TestAssessRiskHedgeRatioClamping(t *testing.T) {
-	model := NewYieldModel()
+	model := newTestModel()
 
 	// Very poor yield should clamp hedge ratio to 0
 	risk := model.AssessRisk(

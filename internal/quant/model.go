@@ -8,9 +8,9 @@ import (
 
 // Model coefficients - calibrated by quantitative team, not user-configurable
 const (
-	coefficientAlpha = 0.2 // Intercept: base yield multiplier
-	coefficientBeta1 = 0.7 // NDVI weight: vegetation health sensitivity
-	coefficientBeta2 = 0.1 // Rainfall weight: moisture sensitivity
+	coefficientAlpha = 0.2 // Yield floor: minimum yield as fraction of baseline
+	coefficientBeta1 = 0.7 // NDVI sensitivity: yield response to NDVI anomaly deviation
+	coefficientBeta2 = 0.1 // Rainfall sensitivity: yield response to rainfall delta
 )
 
 // YieldModel holds the coefficients for the Theta-Yield estimation formula.
@@ -75,13 +75,19 @@ func (m *YieldModel) calculateTimeWeight(daysToHarvest int) float64 {
 }
 
 // EstimateYield calculates yield based on NDVI and rainfall anomalies with time-decay weighting.
-// Formula: Yield_est = (α + (β1 * NDVI_Anomaly * W) + (β2 * Rainfall_Delta * W)) * Baseline_Yield
+// NDVI and rainfall anomalies are expressed as deviations from their historical mean,
+// so a neutral season (anomaly = 0) maps to the baseline yield.
+// Formula: Yield_est = (1 + (β1 * NDVI_Anomaly_Deviation * W) + (β2 * Rainfall_Delta * W)) * Baseline_Yield
+// The multiplier is floored at Alpha to prevent estimates below the yield floor.
 // Returns the estimated yield.
 func (m *YieldModel) EstimateYield(yieldBaseline, ndviAnomaly, rainfallDelta float64) float64 {
 	daysToHarvest := m.calculateDaysToHarvest()
 	w := m.calculateTimeWeight(daysToHarvest)
 
-	multiplier := m.Alpha + (m.Beta1 * ndviAnomaly * w) + (m.Beta2 * rainfallDelta * w)
+	multiplier := 1 + (m.Beta1 * ndviAnomaly * w) + (m.Beta2 * rainfallDelta * w)
+	if multiplier < m.Alpha {
+		multiplier = m.Alpha
+	}
 	return multiplier * yieldBaseline
 }
 
@@ -113,10 +119,11 @@ type ProductionRisk struct {
 
 // AssessRisk evaluates production risk for a given hectare using the Theta-Yield model.
 func (m *YieldModel) AssessRisk(yieldBaseline, historicalNDVIMean, currentNDVI, meanRainfall, actualRainfall, cloudCover float64) *ProductionRisk {
-	// Calculate anomalies
+	// Calculate anomalies as deviations from the historical mean
+	// (0.0 = neutral season, positive = above average, negative = below average)
 	ndviAnomaly := 0.0
 	if historicalNDVIMean > 0 {
-		ndviAnomaly = currentNDVI / historicalNDVIMean
+		ndviAnomaly = (currentNDVI / historicalNDVIMean) - 1
 	}
 
 	rainfallDelta := 0.0
