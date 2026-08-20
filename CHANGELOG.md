@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/shanehull/yieldi.shanehull.com/compare/v0.1.0...v0.1.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* anchor yield model at baseline in neutral seasons ([#6](https://github.com/shanehull/yieldi.shanehull.com/issues/6)) ([3b97a06](https://github.com/shanehull/yieldi.shanehull.com/commit/3b97a0671cbb26a8407636535c76250dd7999760))
+
 ## [0.1.0](https://github.com/shanehull/yieldi.shanehull.com/compare/v0.0.1...v0.1.0) (2026-07-17)
 
 
