@@ -299,13 +299,13 @@
             <div class="panel-advanced">
               <div class="formula-display">
                 <div class="formula-line">
-                  Yield = (α + β₁·NDVI_Δ·W + β₂·Rain_Δ·W) × Baseline
+                  Yield = (1 + β₁·NDVI_Δ·W + β₂·Rain_Δ·W) × Baseline
                 </div>
                 <div class="formula-line">
                   Hedge = Target × (Yield/Baseline) × W
                 </div>
                 <div class="formula-note">
-                  W = (D / SeasonDays)² | Δ = anomaly vs historical mean
+                  W = (D / SeasonDays)² | Δ = anomaly vs historical mean | floor α
                 </div>
               </div>
               <div class="preset-selector">
